@@ -27,6 +27,7 @@ function DieFace({value,size=48,color="#1a1a2e"}) {
 /* ═══════ CUSTOM STRATEGY ═══════ */
 const DEFAULT_CUSTOM = {
   name:"Full Press 5 Then Regress", color:"#f59e0b", placeNumbers:[4,5,6,8,9,10], includePassLine:true,
+  buy410:false,
   rules:[{hitsFrom:1,hitsTo:5,action:"fullPress"},{hitsFrom:6,hitsTo:6,action:"regress"},{hitsFrom:7,hitsTo:999,action:"collect"}],
   on7out:"resetAll", collectProfitTarget:0, stopLossAmount:0,
 };
@@ -36,6 +37,8 @@ const PRESETS = [
   {label:"Half Press Forever",value:{...DEFAULT_CUSTOM,name:"Half Press Forever",rules:[{hitsFrom:1,hitsTo:999,action:"halfPress"}]}},
   {label:"Collect Everything",value:{...DEFAULT_CUSTOM,name:"Flat Collect",rules:[{hitsFrom:1,hitsTo:999,action:"collect"}]}},
   {label:"Power Press 3 → Regress",value:{...DEFAULT_CUSTOM,name:"Power Press 3 Regress",rules:[{hitsFrom:1,hitsTo:3,action:"powerPress"},{hitsFrom:4,hitsTo:4,action:"regress"},{hitsFrom:5,hitsTo:999,action:"collect"}]}},
+  {label:"Spread Across → Collect",value:{...DEFAULT_CUSTOM,name:"Spread Across Then Collect",rules:[{hitsFrom:1,hitsTo:3,action:"spreadAcross"},{hitsFrom:4,hitsTo:999,action:"collect"}]}},
+  {label:"Buy 4/10 + Spread",value:{...DEFAULT_CUSTOM,name:"Buy 4&10 Spread Across",buy410:true,rules:[{hitsFrom:1,hitsTo:4,action:"spreadAcross"},{hitsFrom:5,hitsTo:5,action:"regress"},{hitsFrom:6,hitsTo:999,action:"collect"}]}},
 ];
 const ACTION_LABELS = {
   fullPress:{name:"Full Press",desc:"Add entire payout back onto bet",color:"#f97316"},
@@ -44,6 +47,7 @@ const ACTION_LABELS = {
   collect:{name:"Collect",desc:"Take full payout as profit",color:"#22c55e"},
   regress:{name:"Regress",desc:"Take down to original base bet",color:"#3b82f6"},
   takeDown:{name:"Take Down",desc:"Remove bets entirely and collect",color:"#8b5cf6"},
+  spreadAcross:{name:"Spread Across",desc:"Spread payout evenly across all active place numbers",color:"#14b8a6"},
 };
 
 function applyAction(action, currentBet, payout, baseBet) {
@@ -54,6 +58,7 @@ function applyAction(action, currentBet, payout, baseBet) {
     case "collect": return {profit:payout,newBet:currentBet};
     case "regress": {const diff=currentBet-baseBet;return{profit:payout+Math.max(diff,0),newBet:baseBet};}
     case "takeDown": return {profit:payout+currentBet,newBet:0};
+    case "spreadAcross": return {profit:0,newBet:currentBet,spread:true,spreadAmount:payout};
     default: return {profit:payout,newBet:currentBet};
   }
 }
@@ -94,37 +99,66 @@ function simulateStrategy(strategy, baseBet, numRolls, startingBankroll, customC
       /* ─── CUSTOM ─── */
       const usePass = cfg.includePassLine;
       if (usePass) passAmt=baseBet; else passAmt=0;
+
+      // Buy 4/10: pay 2:1 minus 5% vig on win. Place 4/10: pay 9:5
+      function getPayoutRate(n) {
+        if (cfg.buy410 && (n===4||n===10)) return 2.0; // buy pays 2:1
+        return PLACE_PAYOUTS[n];
+      }
+      function getVig(n, payout) {
+        if (cfg.buy410 && (n===4||n===10)) return payout * 0.05; // 5% commission
+        return 0;
+      }
+
+      function handlePlaceHit(num) {
+        hitCount++;
+        const act=getAction(hitCount);
+        const rawPay=placeBets[num]*getPayoutRate(num);
+        const vig=getVig(num, rawPay);
+        const pay=rawPay-vig;
+        const res=applyAction(act,placeBets[num],pay,baseBet);
+
+        if (res.spread) {
+          // Spread payout evenly across all active place numbers
+          const activeNums=cfg.placeNumbers.filter(n=>placeBets[n]>0||n===num);
+          const perNum=Math.floor(res.spreadAmount/activeNums.length);
+          const remainder=res.spreadAmount-(perNum*activeNums.length);
+          activeNums.forEach(n=>{placeBets[n]+=perNum;});
+          // leftover cents go to profit
+          rollWin+=remainder;
+          event=`Place ${num} HIT #${hitCount} — Spread $${res.spreadAmount.toFixed(0)} across ${activeNums.length} nums${vig>0?` (vig $${vig.toFixed(0)})`:""}`;
+        } else {
+          rollWin+=res.profit;
+          placeBets[num]=res.newBet;
+          event=`Place ${num} HIT #${hitCount} — ${ACTION_LABELS[act]?.name} +$${res.profit.toFixed(0)}${vig>0?` (vig $${vig.toFixed(0)})`:""} (bet→$${placeBets[num].toFixed(0)})`;
+        }
+        wins++;
+      }
+
       if (usePass) {
         if (point===null) {
           if(total===7||total===11){rollWin+=baseBet;event=`Come-out ${total} — Pass WIN`;wins++;}
           else if([2,3,12].includes(total)){rollLoss+=baseBet;event=`Come-out ${total} — Pass LOSE`;losses++;}
-          else{point=total;betsActive=true;hitCount=0;cfg.placeNumbers.forEach(n=>{placeBets[n]=baseBet;});event=`Point set: ${total} — bets ON`;}
+          else{point=total;betsActive=true;hitCount=0;cfg.placeNumbers.forEach(n=>{placeBets[n]=baseBet;});event=`Point set: ${total} — bets ON${cfg.buy410?" (Buy 4&10)":""}`;}
         } else {
-          // show place bets
           if(total===point){
             rollWin+=baseBet;event=`Hit point ${total} — Pass WIN`;wins++;
-            if(cfg.placeNumbers.includes(total)&&betsActive){
-              hitCount++;const act=getAction(hitCount);const pay=placeBets[total]*PLACE_PAYOUTS[total];
-              const res=applyAction(act,placeBets[total],pay,baseBet);
-              rollWin+=res.profit;placeBets[total]=res.newBet;
-              event+=` | Place ${ACTION_LABELS[act]?.name}`;
-            }
+            if(cfg.placeNumbers.includes(total)&&betsActive) handlePlaceHit(total);
             point=null;betsActive=false;Object.keys(placeBets).forEach(k=>{if(!betsActive)placeBets[k]=0;});
           } else if(total===7){
             rollLoss+=baseBet;const exp=betsActive?Object.values(placeBets).reduce((s,v)=>s+v,0):0;rollLoss+=exp;
             event=`SEVEN-OUT — Lose $${(baseBet+exp).toFixed(0)}`;losses++;
             point=null;betsActive=false;hitCount=0;Object.keys(placeBets).forEach(k=>{placeBets[k]=0;});
           } else if(cfg.placeNumbers.includes(total)&&betsActive){
-            hitCount++;const act=getAction(hitCount);const pay=placeBets[total]*PLACE_PAYOUTS[total];
-            const res=applyAction(act,placeBets[total],pay,baseBet);
-            rollWin+=res.profit;placeBets[total]=res.newBet;
-            event=`Place ${total} HIT #${hitCount} — ${ACTION_LABELS[act]?.name} +$${res.profit.toFixed(0)}`;wins++;
+            handlePlaceHit(total);
           } else event=`Roll ${total}`;
         }
       } else {
         if(!betsActive){betsActive=true;hitCount=0;cfg.placeNumbers.forEach(n=>{placeBets[n]=baseBet;});}
         if(total===7){const exp=Object.values(placeBets).reduce((s,v)=>s+v,0);rollLoss+=exp;event=`SEVEN — Lose $${exp.toFixed(0)}`;losses++;betsActive=false;hitCount=0;Object.keys(placeBets).forEach(k=>{placeBets[k]=0;});}
-        else if(cfg.placeNumbers.includes(total)){hitCount++;const act=getAction(hitCount);const pay=placeBets[total]*PLACE_PAYOUTS[total];const res=applyAction(act,placeBets[total],pay,baseBet);rollWin+=res.profit;placeBets[total]=res.newBet;event=`Place ${total} HIT #${hitCount} — ${ACTION_LABELS[act]?.name} +$${res.profit.toFixed(0)}`;wins++;}
+        else if(cfg.placeNumbers.includes(total)){
+          handlePlaceHit(total);
+        }
         else event=`Roll ${total} — no action`;
       }
     } else if (strategy==="passLine"||strategy==="passLineOdds"||strategy==="martingale") {
@@ -220,7 +254,7 @@ function PointPuck({x,y,isOn,number}) {
   );
 }
 
-function CrapsTable({tableState, lastTotal, d1, d2, activeColor, isAnimating}) {
+function CrapsTable({tableState, lastTotal, d1, d2, activeColor, isAnimating, buy410}) {
   if(!tableState) return null;
   const {passLine,dontPass,field,odds,place,point,comePoint,comeBet} = tableState;
   // Table positions for place numbers
@@ -281,8 +315,10 @@ function CrapsTable({tableState, lastTotal, d1, d2, activeColor, isAnimating}) {
               {n===6&&<text x={x+12} y="82" textAnchor="middle" fill="#c9a84c" fontSize="7" opacity="0.6">SIX</text>}
               {n===8&&<text x={x+12} y="82" textAnchor="middle" fill="#c9a84c" fontSize="7" opacity="0.6">EIGHT</text>}
               <text x={x} y="97" textAnchor="middle" fill="#c9a84c" fontSize="8" fontFamily="serif" opacity="0.5">
-                {n===4||n===10?"9 to 5":n===5||n===9?"7 to 5":"7 to 6"}
+                {buy410&&(n===4||n===10)?"BUY 2 to 1":n===4||n===10?"9 to 5":n===5||n===9?"7 to 5":"7 to 6"}
               </text>
+              {buy410&&(n===4||n===10)&&<rect x={x-16} y="56" width="32" height="12" rx="3" fill="#f59e0b" opacity="0.9"/>}
+              {buy410&&(n===4||n===10)&&<text x={x} y="65" textAnchor="middle" fill="#000" fontSize="7" fontWeight="800" fontFamily="'JetBrains Mono',monospace">BUY</text>}
               <Chip cx={x} cy={108} amount={place[n]} color={activeColor} size={16} pulse={isHit}/>
               {isPoint && <PointPuck x={x} y={56} isOn={true} number={n}/>}
             </g>
@@ -370,6 +406,11 @@ function CustomBuilder({config,setConfig}) {
         <div onClick={()=>setConfig({...config,includePassLine:!config.includePassLine})} style={{width:36,height:20,borderRadius:10,background:config.includePassLine?"#f59e0b":"#2a2a3e",cursor:"pointer",position:"relative",transition:"background 0.2s"}}>
           <div style={{width:16,height:16,borderRadius:"50%",background:"#fff",position:"absolute",top:2,left:config.includePassLine?18:2,transition:"left 0.2s"}}/></div>
         <span style={{fontSize:10,color:"#999"}}>Include Pass Line bet</span></div>
+      {/* Buy 4/10 toggle */}
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <div onClick={()=>setConfig({...config,buy410:!config.buy410})} style={{width:36,height:20,borderRadius:10,background:config.buy410?"#f59e0b":"#2a2a3e",cursor:"pointer",position:"relative",transition:"background 0.2s"}}>
+          <div style={{width:16,height:16,borderRadius:"50%",background:"#fff",position:"absolute",top:2,left:config.buy410?18:2,transition:"left 0.2s"}}/></div>
+        <span style={{fontSize:10,color:"#999"}}>Buy 4 & 10 <span style={{color:"#666"}}>(2:1 - 5% vig)</span></span></div>
       <div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
           <div style={{fontSize:9,color:"#555",letterSpacing:1.5,textTransform:"uppercase"}}>Press / Collect Rules</div>
@@ -563,6 +604,7 @@ export default function CrapsSimulator() {
                 d1={curEntry?.d1} d2={curEntry?.d2}
                 activeColor={activeColor}
                 isAnimating={isPlaying}
+                buy410={strategy==="custom"&&customConfig.buy410}
               />
             )}
 

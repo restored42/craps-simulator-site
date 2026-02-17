@@ -423,6 +423,8 @@ export default function CrapsSimulator() {
   const [tab,setTab]=useState("single");
   const [customConfig,setCustomConfig]=useState(DEFAULT_CUSTOM);
   const [showTable,setShowTable]=useState(true);
+  const [showLog,setShowLog]=useState(true);
+  const logRef=useRef(null);
 
   const activeColor=strategy==="custom"?customConfig.color:(STRATEGIES[strategy]?.color||"#888");
   const activeDesc=strategy==="custom"?`Custom: ${customConfig.rules.length} rule(s)`:(STRATEGIES[strategy]?.description||"");
@@ -444,6 +446,11 @@ export default function CrapsSimulator() {
     const step=ts=>{if(ts-lastTime>=speed){lastTime=ts;idx++;if(idx>=result.history.length){setIsPlaying(false);setAnimIndex(result.history.length-1);return;}setAnimIndex(idx);setLiveEvent(result.history[idx]?.event||"");setLiveDice({d1:result.history[idx]?.d1,d2:result.history[idx]?.d2});}animRef.current=requestAnimationFrame(step);};
     animRef.current=requestAnimationFrame(step);return()=>{if(animRef.current)cancelAnimationFrame(animRef.current);};
   },[isPlaying,result,speed]);
+
+  // Auto-scroll log
+  useEffect(()=>{
+    if(logRef.current&&showLog){logRef.current.scrollTop=logRef.current.scrollHeight;}
+  },[animIndex,showLog]);
 
   const curEntry=result&&animIndex!==null?result.history[Math.min(animIndex,result.history.length-1)]:null;
   const curBR=curEntry?.bankroll; const pnl=curBR!==null&&curBR!==undefined?curBR-startingBankroll:null;
@@ -497,10 +504,16 @@ export default function CrapsSimulator() {
           </div>
 
           {/* Table toggle */}
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
             <div onClick={()=>setShowTable(!showTable)} style={{width:36,height:20,borderRadius:10,background:showTable?"#22c55e":"#2a2a3e",cursor:"pointer",position:"relative",transition:"background 0.2s"}}>
               <div style={{width:16,height:16,borderRadius:"50%",background:"#fff",position:"absolute",top:2,left:showTable?18:2,transition:"left 0.2s"}}/></div>
             <span style={{fontSize:10,color:"#999"}}>Show Table</span>
+          </div>
+          {/* Log toggle */}
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+            <div onClick={()=>setShowLog(!showLog)} style={{width:36,height:20,borderRadius:10,background:showLog?"#22c55e":"#2a2a3e",cursor:"pointer",position:"relative",transition:"background 0.2s"}}>
+              <div style={{width:16,height:16,borderRadius:"50%",background:"#fff",position:"absolute",top:2,left:showLog?18:2,transition:"left 0.2s"}}/></div>
+            <span style={{fontSize:10,color:"#999"}}>Show Roll Log</span>
           </div>
 
           <div style={{display:"flex",flexDirection:"column",gap:5,marginTop:10}}>
@@ -552,6 +565,50 @@ export default function CrapsSimulator() {
                 isAnimating={isPlaying}
               />
             )}
+
+            {/* ROLL LOG */}
+            {result && showLog && (()=>{
+              const visibleCount = Math.min(animIndex!==null?animIndex+1:result.history.length, result.history.length);
+              const entries = result.history.slice(Math.max(0,visibleCount-200), visibleCount);
+              return (
+                <div style={{background:"#111122",borderRadius:9,border:"1px solid #1a1a2e",padding:"10px",marginBottom:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                    <div style={{fontSize:8,color:"#444",letterSpacing:2,textTransform:"uppercase"}}>Roll Log</div>
+                    <div style={{fontSize:9,color:"#555"}}>{visibleCount-1} / {result.history.length-1} rolls</div>
+                  </div>
+                  <div ref={logRef} style={{maxHeight:220,overflowY:"auto",fontFamily:"'JetBrains Mono',monospace",fontSize:10,lineHeight:1.8}}>
+                    {/* Header row */}
+                    <div style={{display:"grid",gridTemplateColumns:"50px 44px 1fr 90px 80px",gap:6,padding:"4px 6px",borderBottom:"1px solid #1a1a2e",position:"sticky",top:0,background:"#111122",zIndex:1}}>
+                      <span style={{color:"#555",fontWeight:700}}>Roll</span>
+                      <span style={{color:"#555",fontWeight:700}}>Dice</span>
+                      <span style={{color:"#555",fontWeight:700}}>Event</span>
+                      <span style={{color:"#555",fontWeight:700,textAlign:"right"}}>Bankroll</span>
+                      <span style={{color:"#555",fontWeight:700,textAlign:"right"}}>P&L</span>
+                    </div>
+                    {entries.map((entry,i)=>{
+                      const isWin = entry.event.includes("WIN")||entry.event.includes("HIT #");
+                      const isLose = entry.event.includes("LOSE")||entry.event.includes("SEVEN")||entry.event.includes("BUSTED");
+                      const isPoint = entry.event.includes("Point set")||entry.event.includes("bets ON");
+                      const isPush = entry.event.includes("PUSH");
+                      const isTarget = entry.event.includes("PROFIT TARGET")||entry.event.includes("STOP LOSS");
+                      const entryPnl = entry.bankroll - startingBankroll;
+                      const rowColor = isWin?"#22c55e44":isLose?"#ef444422":isPoint?"#3b82f622":isTarget?"#f59e0b33":"transparent";
+                      const textColor = isWin?"#4ade80":isLose?"#f87171":isPoint?"#60a5fa":isPush?"#888":"#ccc";
+
+                      return (
+                        <div key={entry.roll+"-"+i} style={{display:"grid",gridTemplateColumns:"50px 44px 1fr 90px 80px",gap:6,padding:"3px 6px",background:rowColor,borderBottom:"1px solid #0a0a12",borderRadius:2}}>
+                          <span style={{color:"#666"}}>#{entry.roll}</span>
+                          <span style={{color:"#888"}}>{entry.d1&&entry.d2?`⚁${entry.d1+entry.d2}`:""}</span>
+                          <span style={{color:textColor,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{entry.event}</span>
+                          <span style={{color:entry.bankroll>=startingBankroll?"#4ade80":"#f87171",textAlign:"right",fontWeight:500}}>${entry.bankroll.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                          <span style={{color:entryPnl>=0?"#22c55e":"#ef4444",textAlign:"right"}}>{entryPnl>=0?"+":""}{entryPnl.toFixed(0)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Stats */}
             {result&&animIndex>=result.history.length-1&&(

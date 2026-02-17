@@ -11,6 +11,9 @@ const STRATEGIES = {
   martingale:       { name: "Martingale Pass Line",    description: "Double pass line bet after each loss, reset after win.", color: "#ec4899" },
   conservative:     { name: "Conservative (Pass+Come)",description: "Pass line, then one Come bet. Minimal exposure.", color: "#06b6d4" },
   acrossMartingale: { name: "Across Place + Martingale",description: "Place 4,5,6,8,9,10. Double all after 7-out, reset on hit.", color: "#14b8a6" },
+  allTall:          { name: "All Tall",                description: "Hit all tall numbers (8,9,10,11,12) before a 7. Pays 175:1.", color: "#f472b6" },
+  allSmall:         { name: "All Small",               description: "Hit all small numbers (2,3,4,5,6) before a 7. Pays 175:1.", color: "#38bdf8" },
+  makeEmAll:        { name: "Make 'Em All",            description: "Hit ALL numbers 2-6 and 8-12 before a 7. Pays 1000:1.", color: "#c084fc" },
 };
 
 const PLACE_PAYOUTS = { 4:9/5, 5:7/5, 6:7/6, 8:7/6, 9:7/5, 10:9/5 };
@@ -71,10 +74,17 @@ function simulateStrategy(strategy, baseBet, numRolls, startingBankroll, customC
   let placeBets={4:0,5:0,6:0,8:0,9:0,10:0};
   let passAmt=0, dontPassAmt=0, fieldAmt=0, oddsAmt=0;
   let hitCount=0, betsActive=false;
+  // Prop bet tracking: which numbers have been hit this round
+  let propHit=new Set(), propBetAmt=0, propType=null;
+  const ALL_TALL=[8,9,10,11,12], ALL_SMALL=[2,3,4,5,6], MAKE_EM_ALL=[2,3,4,5,6,8,9,10,11,12];
+  if(strategy==="allTall"){propType="tall";propBetAmt=baseBet;}
+  if(strategy==="allSmall"){propType="small";propBetAmt=baseBet;}
+  if(strategy==="makeEmAll"){propType="all";propBetAmt=baseBet;}
 
   function makeTableState() {
     return { passLine:passAmt, dontPass:dontPassAmt, field:fieldAmt, odds:oddsAmt,
-      place:{...placeBets}, point, comePoint, comeBet };
+      place:{...placeBets}, point, comePoint, comeBet,
+      propType, propBetAmt, propHit:new Set(propHit) };
   }
 
   let history=[{roll:0,bankroll,event:"Start",tableState:makeTableState()}];
@@ -212,6 +222,32 @@ function simulateStrategy(strategy, baseBet, numRolls, startingBankroll, customC
       if(PLACE_NUMS.includes(total)){let payout=unitBet*PLACE_PAYOUTS[total];rollWin=payout;event=`Place ${total} HIT — WIN +$${payout.toFixed(0)}`;wins++;currentBet=baseBet;}
       else if(total===7){rollLoss=unitBet*6;event=`Seven-out — LOSE $${(unitBet*6).toFixed(0)}`;losses++;currentBet=Math.min(currentBet*2,bankroll);PLACE_NUMS.forEach(n=>{placeBets[n]=0;});}
       else event=`Roll ${total} — no action`;
+    } else if (strategy==="allTall"||strategy==="allSmall"||strategy==="makeEmAll") {
+      const targetNums = strategy==="allTall"?ALL_TALL:strategy==="allSmall"?ALL_SMALL:MAKE_EM_ALL;
+      const payMultiple = strategy==="makeEmAll"?1000:175;
+      const label = strategy==="allTall"?"Tall":strategy==="allSmall"?"Small":"Make 'Em All";
+      if(total===7) {
+        // 7 wipes out progress, lose bet, re-bet
+        rollLoss=propBetAmt; propHit.clear(); losses++;
+        event=`SEVEN — ${label} LOSE $${propBetAmt} — reset`;
+      } else {
+        if(targetNums.includes(total) && !propHit.has(total)) {
+          propHit.add(total);
+          const remaining = targetNums.filter(n=>!propHit.has(n));
+          if(remaining.length===0) {
+            // HIT THEM ALL — massive payout!
+            rollWin=propBetAmt*payMultiple;
+            event=`🎉 ${label} COMPLETE — WIN $${rollWin.toFixed(0)} (${payMultiple}:1)!!!`;
+            wins++; propHit.clear(); // reset for next round
+          } else {
+            event=`${total} ✓ marked — ${label} ${propHit.size}/${targetNums.length} (need: ${remaining.join(",")})`;
+          }
+        } else if(targetNums.includes(total)) {
+          event=`${total} already marked — ${label} ${propHit.size}/${targetNums.length}`;
+        } else {
+          event=`Roll ${total} — not a ${label} number`;
+        }
+      }
     }
 
     bankroll+=rollWin-rollLoss;
@@ -299,9 +335,9 @@ function SevenOutBurst({cx, cy, active}) {
 
 function CrapsTable({tableState, lastTotal, d1, d2, activeColor, isAnimating, buy410, rollWin, rollLoss, animKey}) {
   if(!tableState) return null;
-  const {passLine,dontPass,field,odds,place,point,comePoint,comeBet} = tableState;
+  const {passLine,dontPass,field,odds,place,point,comePoint,comeBet,propType,propBetAmt,propHit} = tableState;
   const placeX = {4:128,5:212,6:296,8:380,9:464,10:548};
-  const tw=660, th=320;
+  const tw=660, th=propType?360:320;
   const hitNum = lastTotal;
   const isSevenOut = lastTotal===7 && rollLoss>0 && isAnimating;
   const isWin = rollWin>0 && isAnimating;
@@ -444,6 +480,45 @@ function CrapsTable({tableState, lastTotal, d1, d2, activeColor, isAnimating, bu
 
         {/* ─── SEVEN OUT BURST ─── */}
         <SevenOutBurst cx={tw/2} cy={th/2-10} active={isSevenOut}/>
+
+        {/* ─── PROP BET TRACKER ─── */}
+        {propType && propBetAmt>0 && (()=>{
+          const ALL_TALL=[8,9,10,11,12], ALL_SMALL=[2,3,4,5,6], MAKE_EM_ALL=[2,3,4,5,6,8,9,10,11,12];
+          const targets = propType==="tall"?ALL_TALL:propType==="small"?ALL_SMALL:MAKE_EM_ALL;
+          const label = propType==="tall"?"ALL TALL (175:1)":propType==="small"?"ALL SMALL (175:1)":"MAKE 'EM ALL (1000:1)";
+          const hitSet = propHit||new Set();
+          const pColor = propType==="tall"?"#f472b6":propType==="small"?"#38bdf8":"#c084fc";
+          const py = th-42; // position near bottom of expanded table
+          const numW = 32, gap=4, totalW=targets.length*(numW+gap)-gap;
+          const startX = (tw-totalW)/2;
+          return (
+            <g>
+              <rect x="16" y={py-18} width={tw-32} height="50" rx="6" fill="#1a5c2a" stroke={pColor} strokeWidth="1" opacity="0.6"/>
+              <text x={tw/2} y={py-4} textAnchor="middle" fill={pColor} fontSize="8" fontWeight="700" fontFamily="'JetBrains Mono',monospace" letterSpacing="2">{label}</text>
+              <Chip cx={56} cy={py+12} amount={propBetAmt} color={pColor} size={13}/>
+              {targets.map((n,i)=>{
+                const bx=startX+i*(numW+gap);
+                const isMarked = hitSet.has?hitSet.has(n):false;
+                const justHit = hitNum===n && isAnimating && isMarked;
+                return (
+                  <g key={n}>
+                    <rect x={bx} y={py+2} width={numW} height="22" rx="4"
+                      fill={isMarked?"#22c55e33":"#0a0a12"} stroke={isMarked?"#22c55e":pColor+"55"} strokeWidth={justHit?"2":"1"}
+                      opacity={isMarked?1:0.6}/>
+                    {justHit && <rect x={bx} y={py+2} width={numW} height="22" rx="4" fill="#22c55e" opacity="0.3" style={{animation:"hitGlow 0.6s ease-out forwards"}}/>}
+                    <text x={bx+numW/2} y={py+17} textAnchor="middle" fill={isMarked?"#4ade80":"#666"}
+                      fontSize="11" fontWeight={isMarked?"800":"400"} fontFamily="'JetBrains Mono',monospace">
+                      {isMarked?"✓":n}
+                    </text>
+                  </g>
+                );
+              })}
+              <text x={tw-56} y={py+17} textAnchor="middle" fill={pColor} fontSize="10" fontWeight="700" fontFamily="'JetBrains Mono',monospace">
+                {hitSet.size||0}/{targets.length}
+              </text>
+            </g>
+          );
+        })()}
 
         </svg>
       </div>
@@ -667,7 +742,7 @@ export default function CrapsSimulator() {
         </div>
 
         {/* Main */}
-        <div style={{flex:1,padding:"12px 16px",overflowY:"auto"}}>
+        <div style={{flex:1,padding:"12px 16px",overflowY:"auto",overflowX:"hidden",minWidth:0}}>
           {(tab==="single"||tab==="custom")&&(<>
             {/* Live status bar */}
             {result&&(

@@ -1,4 +1,3 @@
-<meta name="google-site-verification" content="3bRDvcxEYLDqyH4TvUTDYkyq3rYW6xYum3vevjYS-L4" />
 import { useState, useRef, useCallback, useEffect } from "react";
 
 /* ───────── strategies ───────── */

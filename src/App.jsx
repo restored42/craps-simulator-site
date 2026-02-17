@@ -539,8 +539,8 @@ export default function CrapsSimulator() {
               <input type="range" min={min} max={max} step={step} value={value} onChange={e=>set(Number(e.target.value))} style={{width:"100%",accentColor:activeColor}}/></div>))}
 
           <div style={{marginBottom:8}}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><label style={{fontSize:10,color:"#777"}}>Speed</label><span style={{fontSize:11,color:"#999"}}>{speed}ms</span></div>
-            <input type="range" min={1} max={200} value={speed} onChange={e=>setSpeed(Number(e.target.value))} style={{width:"100%",accentColor:"#666"}}/>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><label style={{fontSize:10,color:"#777"}}>Speed</label><span style={{fontSize:11,color:"#999"}}>{speed>=1000?`${(speed/1000).toFixed(1)}s`:speed+"ms"}</span></div>
+            <input type="range" min={1} max={2000} step={speed<200?1:speed<500?10:50} value={speed} onChange={e=>setSpeed(Number(e.target.value))} style={{width:"100%",accentColor:"#666"}}/>
             <div style={{display:"flex",justifyContent:"space-between",fontSize:8,color:"#444"}}><span>Fast</span><span>Slow</span></div>
           </div>
 

@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { Analytics } from "@vercel/analytics/react";
 
 /* ───────── strategies ───────── */
 const STRATEGIES = {
@@ -611,6 +612,7 @@ export default function CrapsSimulator() {
           </>)}
         </div>
       </div>
+      <Analytics />
     </div>
   );
 }

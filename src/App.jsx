@@ -217,7 +217,7 @@ function simulateStrategy(strategy, baseBet, numRolls, startingBankroll, customC
     bankroll+=rollWin-rollLoss;
     if(bankroll>high)high=bankroll; if(bankroll<low)low=bankroll;
     const ts=makeTableState();
-    const h={roll:i+1,bankroll,event,d1,d2,total,tableState:ts};
+    const h={roll:i+1,bankroll,event,d1,d2,total,tableState:ts,rollWin,rollLoss};
     if(bankroll<=0){h.event="BUSTED";h.bankroll=0;history.push(h);break;}
     history.push(h);
 
@@ -228,6 +228,7 @@ function simulateStrategy(strategy, baseBet, numRolls, startingBankroll, customC
   if(strategy==="field"||strategy==="ironCross") fieldAmt=0;
   return {history,high,low,final:bankroll,wins,losses};
 }
+
 
 /* ═══════════════════════════════════════
    CRAPS TABLE SVG — visual felt layout
@@ -244,7 +245,7 @@ function Chip({cx,cy,amount,color="#e2b714",size=18,pulse=false}) {
   );
 }
 
-function PointPuck({x,y,isOn,number}) {
+function PointPuck({x,y,isOn}) {
   if(!isOn) return null;
   return (
     <g>
@@ -254,13 +255,64 @@ function PointPuck({x,y,isOn,number}) {
   );
 }
 
-function CrapsTable({tableState, lastTotal, d1, d2, activeColor, isAnimating, buy410}) {
+/* Floating +/- amount that rises and fades out */
+function FloatingAmount({cx, cy, amount, isWin, animKey}) {
+  if(!amount || amount===0) return null;
+  const color = isWin ? "#4ade80" : "#f87171";
+  const prefix = isWin ? "+" : "-";
+  const label = `${prefix}$${Math.abs(Math.round(amount))}`;
+  return (
+    <g key={animKey}>
+      <text x={cx} y={cy} textAnchor="middle" fill={color} fontSize="15" fontWeight="900"
+        fontFamily="'JetBrains Mono',monospace" stroke="#000" strokeWidth="0.5"
+        style={{animation:"floatUp 1.4s ease-out forwards"}}>
+        {label}
+      </text>
+      {/* sparkle particles on win */}
+      {isWin && [[-14,-5],[14,-7],[0,-13],[-9,3],[11,1],[6,-10],[-6,-12]].map(([ox,oy],i)=>(
+        <circle key={i} cx={cx+ox} cy={cy+oy-4} r="1.5" fill={color}
+          style={{animation:`sparkle 0.9s ease-out ${i*0.07}s forwards`, opacity:0}}/>
+      ))}
+    </g>
+  );
+}
+
+/* Seven-out burst effect — red starburst with text */
+function SevenOutBurst({cx, cy, active}) {
+  if(!active) return null;
+  return (
+    <g>
+      {[0,30,60,90,120,150,180,210,240,270,300,330].map((angle,i)=>{
+        const rad=angle*Math.PI/180;
+        const x2=cx+Math.cos(rad)*50, y2=cy+Math.sin(rad)*50;
+        return <line key={i} x1={cx} y1={cy} x2={x2} y2={y2} stroke="#ef4444" strokeWidth="2.5"
+          strokeDasharray="40" style={{animation:`burstLine 0.7s ease-out ${i*0.025}s forwards`, opacity:0}}/>;
+      })}
+      <text x={cx} y={cy-35} textAnchor="middle" fill="#ef4444" fontSize="18" fontWeight="900"
+        fontFamily="'Playfair Display',serif" stroke="#000" strokeWidth="0.3"
+        style={{animation:"floatUp 1.4s ease-out forwards"}}>
+        SEVEN OUT!
+      </text>
+    </g>
+  );
+}
+
+function CrapsTable({tableState, lastTotal, d1, d2, activeColor, isAnimating, buy410, rollWin, rollLoss, animKey}) {
   if(!tableState) return null;
   const {passLine,dontPass,field,odds,place,point,comePoint,comeBet} = tableState;
-  // Table positions for place numbers
   const placeX = {4:128,5:212,6:296,8:380,9:464,10:548};
   const tw=660, th=320;
   const hitNum = lastTotal;
+  const isSevenOut = lastTotal===7 && rollLoss>0 && isAnimating;
+  const isWin = rollWin>0 && isAnimating;
+  const isLoss = rollLoss>0 && !isWin && isAnimating;
+
+  // Figure out where to show the floating win number — above the hit number box
+  let floatX=tw/2, floatY=140;
+  if(hitNum && placeX[hitNum] && isWin) { floatX=placeX[hitNum]; floatY=42; }
+  else if(isWin && passLine>0) { floatX=100; floatY=th-68; }
+  else if(isWin && dontPass>0) { floatX=100; floatY=8; }
+  else if(isWin && field>0) { floatX=180; floatY=th-118; }
 
   return (
     <div style={{background:"#111122",borderRadius:10,border:"1px solid #1a1a2e",padding:"12px",marginBottom:14,position:"relative",overflow:"hidden"}}>
@@ -268,9 +320,37 @@ function CrapsTable({tableState, lastTotal, d1, d2, activeColor, isAnimating, bu
         @keyframes chipPulse { 0%{transform:scale(1.4);opacity:0.5} 100%{transform:scale(1);opacity:1} }
         @keyframes diceRoll { 0%{transform:rotate(0deg) scale(0.5);opacity:0} 50%{transform:rotate(180deg) scale(1.2);opacity:1} 100%{transform:rotate(360deg) scale(1);opacity:1} }
         @keyframes hitGlow { 0%{opacity:0.8} 100%{opacity:0} }
+        @keyframes floatUp {
+          0% { opacity:1; transform:translateY(0) scale(0.7); }
+          15% { opacity:1; transform:translateY(-4px) scale(1.2); }
+          50% { opacity:1; transform:translateY(-22px) scale(1.05); }
+          100% { opacity:0; transform:translateY(-55px) scale(0.7); }
+        }
+        @keyframes sparkle {
+          0% { opacity:0; r:1; }
+          25% { opacity:1; r:3.5; }
+          100% { opacity:0; r:0; transform:translate(0, -25px); }
+        }
+        @keyframes burstLine {
+          0% { opacity:0; stroke-dashoffset:40; }
+          25% { opacity:0.9; }
+          100% { opacity:0; stroke-dashoffset:0; }
+        }
+        @keyframes lossFlash {
+          0% { opacity:0.2; }
+          100% { opacity:0; }
+        }
+        @keyframes winShimmer {
+          0% { opacity:0; }
+          25% { opacity:0.08; }
+          100% { opacity:0; }
+        }
       `}</style>
       <div style={{fontSize:8,color:"#444",letterSpacing:2,textTransform:"uppercase",marginBottom:6}}>Craps Table</div>
-      <svg width="100%" viewBox={`0 0 ${tw} ${th}`} style={{display:"block"}}>
+      {/* Fixed aspect ratio container — prevents table from resizing during sim */}
+      <div style={{width:"100%",paddingBottom:`${(th/tw)*100}%`,position:"relative"}}>
+        <svg viewBox={`0 0 ${tw} ${th}`} preserveAspectRatio="xMidYMid meet"
+          style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",display:"block"}}>
         {/* Felt background */}
         <defs>
           <pattern id="felt" patternUnits="userSpaceOnUse" width="4" height="4">
@@ -280,6 +360,10 @@ function CrapsTable({tableState, lastTotal, d1, d2, activeColor, isAnimating, bu
         </defs>
         <rect x="4" y="4" width={tw-8} height={th-8} rx="20" fill="url(#felt)" stroke="#8b7332" strokeWidth="4"/>
         <rect x="10" y="10" width={tw-20} height={th-20} rx="16" fill="none" stroke="#c9a84c" strokeWidth="1.5" opacity="0.4"/>
+
+        {/* Full-table flash overlays for big moments */}
+        {isWin && <rect x="4" y="4" width={tw-8} height={th-8} rx="20" fill="#4ade80" style={{animation:"winShimmer 0.9s ease-out forwards"}}/>}
+        {isSevenOut && <rect x="4" y="4" width={tw-8} height={th-8} rx="20" fill="#ef4444" style={{animation:"lossFlash 0.5s ease-out forwards"}}/>}
 
         {/* ─── PASS LINE ─── */}
         <rect x="16" y={th-60} width={tw-32} height="44" rx="6" fill="#1a5c2a" stroke="#c9a84c" strokeWidth="1" opacity="0.7"/>
@@ -309,8 +393,8 @@ function CrapsTable({tableState, lastTotal, d1, d2, activeColor, isAnimating, bu
           const isPoint = point===n;
           return (
             <g key={n}>
-              <rect x={bx} y="54" width={w} height="66" rx="4" fill={isHit?"#2a7c3a":"#1a5c2a"} stroke="#c9a84c" strokeWidth="1" opacity={isHit?1:0.7}/>
-              {isHit && <rect x={bx} y="54" width={w} height="66" rx="4" fill="#4ade80" opacity="0.15" style={{animation:"hitGlow 0.5s ease-out forwards"}}/>}
+              <rect x={bx} y="54" width={w} height="66" rx="4" fill={isHit?"#2a7c3a":"#1a5c2a"} stroke={isHit?"#4ade80":"#c9a84c"} strokeWidth={isHit?"2":"1"} opacity={isHit?1:0.7}/>
+              {isHit && <rect x={bx} y="54" width={w} height="66" rx="4" fill="#4ade80" opacity="0.15" style={{animation:"hitGlow 0.6s ease-out forwards"}}/>}
               <text x={x} y="78" textAnchor="middle" fill="#fff" fontSize="20" fontWeight="900" fontFamily="'Playfair Display',serif" opacity="0.9">{n}</text>
               {n===6&&<text x={x+12} y="82" textAnchor="middle" fill="#c9a84c" fontSize="7" opacity="0.6">SIX</text>}
               {n===8&&<text x={x+12} y="82" textAnchor="middle" fill="#c9a84c" fontSize="7" opacity="0.6">EIGHT</text>}
@@ -320,16 +404,14 @@ function CrapsTable({tableState, lastTotal, d1, d2, activeColor, isAnimating, bu
               {buy410&&(n===4||n===10)&&<rect x={x-16} y="56" width="32" height="12" rx="3" fill="#f59e0b" opacity="0.9"/>}
               {buy410&&(n===4||n===10)&&<text x={x} y="65" textAnchor="middle" fill="#000" fontSize="7" fontWeight="800" fontFamily="'JetBrains Mono',monospace">BUY</text>}
               <Chip cx={x} cy={108} amount={place[n]} color={activeColor} size={16} pulse={isHit}/>
-              {isPoint && <PointPuck x={x} y={56} isOn={true} number={n}/>}
+              {isPoint && <PointPuck x={x} y={56} isOn={true}/>}
             </g>
           );
         })}
 
         {/* Come point marker */}
         {comePoint && placeX[comePoint] && (
-          <g>
-            <circle cx={placeX[comePoint]} cy={108} r={20} fill="none" stroke="#06b6d4" strokeWidth="2" strokeDasharray="4,3" opacity="0.7"/>
-          </g>
+          <g><circle cx={placeX[comePoint]} cy={108} r={20} fill="none" stroke="#06b6d4" strokeWidth="2" strokeDasharray="4,3" opacity="0.7"/></g>
         )}
 
         {/* ─── BIG 6 / BIG 8 ─── */}
@@ -350,7 +432,21 @@ function CrapsTable({tableState, lastTotal, d1, d2, activeColor, isAnimating, bu
             <text x={tw/2} y="230" textAnchor="middle" fill="#fff" fontSize="16" fontWeight="900" fontFamily="'Playfair Display',serif" opacity="0.9">{d1+d2}</text>
           </g>
         )}
-      </svg>
+
+        {/* ─── FLOATING WIN AMOUNT — rises above hit box ─── */}
+        {isWin && rollWin>0 && (
+          <FloatingAmount cx={floatX} cy={floatY} amount={rollWin} isWin={true} animKey={`w-${animKey}`}/>
+        )}
+        {/* ─── FLOATING LOSS AMOUNT ─── */}
+        {isLoss && rollLoss>0 && (
+          <FloatingAmount cx={tw/2} cy={148} amount={rollLoss} isWin={false} animKey={`l-${animKey}`}/>
+        )}
+
+        {/* ─── SEVEN OUT BURST ─── */}
+        <SevenOutBurst cx={tw/2} cy={th/2-10} active={isSevenOut}/>
+
+        </svg>
+      </div>
     </div>
   );
 }
@@ -605,6 +701,9 @@ export default function CrapsSimulator() {
                 activeColor={activeColor}
                 isAnimating={isPlaying}
                 buy410={strategy==="custom"&&customConfig.buy410}
+                rollWin={curEntry?.rollWin||0}
+                rollLoss={curEntry?.rollLoss||0}
+                animKey={animIndex}
               />
             )}
 

@@ -11,9 +11,10 @@ const STRATEGIES = {
   martingale:       { name: "Martingale Pass Line",    description: "Double pass line bet after each loss, reset after win.", color: "#ec4899" },
   conservative:     { name: "Conservative (Pass+Come)",description: "Pass line, then one Come bet. Minimal exposure.", color: "#06b6d4" },
   acrossMartingale: { name: "Across Place + Martingale",description: "Place 4,5,6,8,9,10. Double all after 7-out, reset on hit.", color: "#14b8a6" },
-  allTall:          { name: "All Tall",                description: "Hit all tall numbers (8,9,10,11,12) before a 7. Pays 175:1.", color: "#f472b6" },
-  allSmall:         { name: "All Small",               description: "Hit all small numbers (2,3,4,5,6) before a 7. Pays 175:1.", color: "#38bdf8" },
-  makeEmAll:        { name: "Make 'Em All",            description: "Hit ALL numbers 2-6 and 8-12 before a 7. Pays 1000:1.", color: "#c084fc" },
+  allTall:          { name: "All Tall",                description: "Hit all tall numbers (8,9,10,11,12) before a 7. Pays 34:1.", color: "#f472b6" },
+  allSmall:         { name: "All Small",               description: "Hit all small numbers (2,3,4,5,6) before a 7. Pays 34:1.", color: "#38bdf8" },
+  makeEmAll:        { name: "Make 'Em All",            description: "Hit ALL numbers 2-6 and 8-12 before a 7. Pays 175:1.", color: "#c084fc" },
+  atsCombo:         { name: "ATS + Pass + Odds + Across", description: "Pass line + 2x odds + place across + All Tall + All Small + Make 'Em All. The full send.", color: "#fbbf24" },
 };
 
 const PLACE_PAYOUTS = { 4:9/5, 5:7/5, 6:7/6, 8:7/6, 9:7/5, 10:9/5 };
@@ -67,24 +68,39 @@ function applyAction(action, currentBet, payout, baseBet) {
 }
 
 /* ═══════ SIMULATION — now tracks table state for chips ═══════ */
-function simulateStrategy(strategy, baseBet, numRolls, startingBankroll, customConfig) {
+function simulateStrategy(strategy, baseBet, numRolls, startingBankroll, customConfig, betConfig) {
+  const bc = betConfig || {};
+  const plBet = bc.passLineBet || baseBet;   // pass line amount
+  const acBet = bc.acrossBet || baseBet;     // across/place bet per number
+  const prBet = bc.propBet || baseBet;       // prop bet amount each
   let bankroll=startingBankroll, high=startingBankroll, low=startingBankroll;
   let point=null, wins=0, losses=0, currentBet=baseBet;
   let comePoint=null, comeBet=0;
   let placeBets={4:0,5:0,6:0,8:0,9:0,10:0};
   let passAmt=0, dontPassAmt=0, fieldAmt=0, oddsAmt=0;
   let hitCount=0, betsActive=false;
-  // Prop bet tracking: which numbers have been hit this round
-  let propHit=new Set(), propBetAmt=0, propType=null;
+  // Prop bet tracking — each prop tracked independently
   const ALL_TALL=[8,9,10,11,12], ALL_SMALL=[2,3,4,5,6], MAKE_EM_ALL=[2,3,4,5,6,8,9,10,11,12];
-  if(strategy==="allTall"){propType="tall";propBetAmt=baseBet;}
-  if(strategy==="allSmall"){propType="small";propBetAmt=baseBet;}
-  if(strategy==="makeEmAll"){propType="all";propBetAmt=baseBet;}
+  let propTallHit=new Set(), propSmallHit=new Set(), propAllHit=new Set();
+  let propTallBet=0, propSmallBet=0, propAllBet=0;
+  let propTallActive=false, propSmallActive=false, propAllActive=false;
+  if(strategy==="allTall"){propTallActive=true;propTallBet=prBet;}
+  if(strategy==="allSmall"){propSmallActive=true;propSmallBet=prBet;}
+  if(strategy==="makeEmAll"){propAllActive=true;propAllBet=prBet;}
+  if(strategy==="atsCombo"){propTallActive=true;propSmallActive=true;propAllActive=true;propTallBet=prBet;propSmallBet=prBet;propAllBet=prBet;}
+
+  // Legacy compat for table display
+  function getPropDisplay() {
+    if(propTallActive&&propSmallActive&&propAllActive) return {propType:"ats",propBetAmt:propTallBet+propSmallBet+propAllBet,propTallHit:new Set(propTallHit),propSmallHit:new Set(propSmallHit),propAllHit:new Set(propAllHit)};
+    if(propTallActive) return {propType:"tall",propBetAmt:propTallBet,propTallHit:new Set(propTallHit),propSmallHit:new Set(),propAllHit:new Set()};
+    if(propSmallActive) return {propType:"small",propBetAmt:propSmallBet,propTallHit:new Set(),propSmallHit:new Set(propSmallHit),propAllHit:new Set()};
+    if(propAllActive) return {propType:"all",propBetAmt:propAllBet,propTallHit:new Set(),propSmallHit:new Set(),propAllHit:new Set(propAllHit)};
+    return {propType:null,propBetAmt:0,propTallHit:new Set(),propSmallHit:new Set(),propAllHit:new Set()};
+  }
 
   function makeTableState() {
     return { passLine:passAmt, dontPass:dontPassAmt, field:fieldAmt, odds:oddsAmt,
-      place:{...placeBets}, point, comePoint, comeBet,
-      propType, propBetAmt, propHit:new Set(propHit) };
+      place:{...placeBets}, point, comePoint, comeBet, ...getPropDisplay() };
   }
 
   let history=[{roll:0,bankroll,event:"Start",tableState:makeTableState()}];
@@ -223,31 +239,100 @@ function simulateStrategy(strategy, baseBet, numRolls, startingBankroll, customC
       else if(total===7){rollLoss=unitBet*6;event=`Seven-out — LOSE $${(unitBet*6).toFixed(0)}`;losses++;currentBet=Math.min(currentBet*2,bankroll);PLACE_NUMS.forEach(n=>{placeBets[n]=0;});}
       else event=`Roll ${total} — no action`;
     } else if (strategy==="allTall"||strategy==="allSmall"||strategy==="makeEmAll") {
+      // Standalone prop bets
       const targetNums = strategy==="allTall"?ALL_TALL:strategy==="allSmall"?ALL_SMALL:MAKE_EM_ALL;
-      const payMultiple = strategy==="makeEmAll"?1000:175;
+      const hitSet = strategy==="allTall"?propTallHit:strategy==="allSmall"?propSmallHit:propAllHit;
+      const payMultiple = strategy==="makeEmAll"?175:34;
+      const betAmt = strategy==="allTall"?propTallBet:strategy==="allSmall"?propSmallBet:propAllBet;
       const label = strategy==="allTall"?"Tall":strategy==="allSmall"?"Small":"Make 'Em All";
       if(total===7) {
-        // 7 wipes out progress, lose bet, re-bet
-        rollLoss=propBetAmt; propHit.clear(); losses++;
-        event=`SEVEN — ${label} LOSE $${propBetAmt} — reset`;
+        rollLoss=betAmt; hitSet.clear(); losses++;
+        event=`SEVEN — ${label} LOSE $${betAmt} — reset`;
       } else {
-        if(targetNums.includes(total) && !propHit.has(total)) {
-          propHit.add(total);
-          const remaining = targetNums.filter(n=>!propHit.has(n));
+        if(targetNums.includes(total) && !hitSet.has(total)) {
+          hitSet.add(total);
+          const remaining = targetNums.filter(n=>!hitSet.has(n));
           if(remaining.length===0) {
-            // HIT THEM ALL — massive payout!
-            rollWin=propBetAmt*payMultiple;
+            rollWin=betAmt*payMultiple;
             event=`🎉 ${label} COMPLETE — WIN $${rollWin.toFixed(0)} (${payMultiple}:1)!!!`;
-            wins++; propHit.clear(); // reset for next round
+            wins++; hitSet.clear();
           } else {
-            event=`${total} ✓ marked — ${label} ${propHit.size}/${targetNums.length} (need: ${remaining.join(",")})`;
+            event=`${total} ✓ marked — ${label} ${hitSet.size}/${targetNums.length} (need: ${remaining.join(",")})`;
           }
         } else if(targetNums.includes(total)) {
-          event=`${total} already marked — ${label} ${propHit.size}/${targetNums.length}`;
+          event=`${total} already marked — ${label} ${hitSet.size}/${targetNums.length}`;
         } else {
           event=`Roll ${total} — not a ${label} number`;
         }
       }
+    } else if (strategy==="atsCombo") {
+      /* ─── ATS COMBO: Pass + 2x Odds + Across + All Tall + All Small + Make 'Em All ─── */
+      passAmt=plBet; const ob=plBet*2;
+      let propEvents=[];
+
+      // --- Pass Line + Odds ---
+      if(point===null) {
+        if(total===7||total===11){rollWin+=plBet;event=`Come-out ${total} — Pass WIN`;wins++;}
+        else if([2,3,12].includes(total)){rollLoss+=plBet;event=`Come-out ${total} — Pass LOSE`;losses++;}
+        else{point=total;event=`Point set: ${total}`;oddsAmt=ob;PLACE_NUMS.forEach(n=>{placeBets[n]=acBet;});betsActive=true;}
+      } else {
+        oddsAmt=ob;
+        if(total===point){
+          const op={4:2,5:1.5,6:1.2,8:1.2,9:1.5,10:2};
+          let payout=plBet+ob*(op[point]||1);
+          rollWin+=payout; event=`Hit point ${point} — Pass+Odds WIN +$${payout.toFixed(0)}`;
+          if(PLACE_NUMS.includes(total)&&betsActive){
+            const pp=acBet*PLACE_PAYOUTS[total]; rollWin+=pp;
+            event+=` | Place +$${pp.toFixed(0)}`;
+          }
+          point=null;oddsAmt=0;betsActive=false;wins++;
+          PLACE_NUMS.forEach(n=>{placeBets[n]=0;});
+        } else if(total===7){
+          rollLoss+=plBet+ob;
+          const placeExp=betsActive?Object.values(placeBets).reduce((s,v)=>s+v,0):0;
+          rollLoss+=placeExp;
+          event=`SEVEN-OUT — Lose pass+odds+across $${(plBet+ob+placeExp).toFixed(0)}`;
+          point=null;oddsAmt=0;betsActive=false;losses++;
+          PLACE_NUMS.forEach(n=>{placeBets[n]=0;});
+        } else if(PLACE_NUMS.includes(total)&&betsActive){
+          const pp=acBet*PLACE_PAYOUTS[total]; rollWin+=pp; wins++;
+          event=`Place ${total} HIT — +$${pp.toFixed(0)}`;
+        } else {
+          event=`Roll ${total}`;
+        }
+      }
+
+      // --- Prop bets: track all 3 independently ---
+      function handleProp(label, hitSet, targets, betAmt, payMultiple) {
+        if(total===7) {
+          const lost=betAmt; hitSet.clear();
+          return {loss:lost, msg:`${label} LOSE`};
+        }
+        if(targets.includes(total)&&!hitSet.has(total)){
+          hitSet.add(total);
+          const remaining=targets.filter(n=>!hitSet.has(n));
+          if(remaining.length===0){
+            const winAmt=betAmt*payMultiple;
+            hitSet.clear();
+            return {win:winAmt, msg:`🎉 ${label} COMPLETE +$${winAmt}!`};
+          }
+          return {msg:`${label} ${hitSet.size}/${targets.length}`};
+        }
+        return null;
+      }
+
+      const pTall=handleProp("Tall",propTallHit,ALL_TALL,propTallBet,34);
+      const pSmall=handleProp("Small",propSmallHit,ALL_SMALL,propSmallBet,34);
+      const pAll=handleProp("All",propAllHit,MAKE_EM_ALL,propAllBet,175);
+
+      [pTall,pSmall,pAll].forEach(p=>{
+        if(!p) return;
+        if(p.win) rollWin+=p.win;
+        if(p.loss) rollLoss+=p.loss;
+        if(p.msg) propEvents.push(p.msg);
+      });
+
+      if(propEvents.length>0) event+=` | ${propEvents.join(" | ")}`;
     }
 
     bankroll+=rollWin-rollLoss;
@@ -335,9 +420,10 @@ function SevenOutBurst({cx, cy, active}) {
 
 function CrapsTable({tableState, lastTotal, d1, d2, activeColor, isAnimating, buy410, rollWin, rollLoss, animKey}) {
   if(!tableState) return null;
-  const {passLine,dontPass,field,odds,place,point,comePoint,comeBet,propType,propBetAmt,propHit} = tableState;
+  const {passLine,dontPass,field,odds,place,point,comePoint,comeBet,propType,propBetAmt,propTallHit,propSmallHit,propAllHit} = tableState;
   const placeX = {4:128,5:212,6:296,8:380,9:464,10:548};
-  const tw=660, th=propType?360:320;
+  const isATS = propType==="ats";
+  const tw=660, th=propType?(isATS?420:360):320;
   const hitNum = lastTotal;
   const isSevenOut = lastTotal===7 && rollLoss>0 && isAnimating;
   const isWin = rollWin>0 && isAnimating;
@@ -484,40 +570,59 @@ function CrapsTable({tableState, lastTotal, d1, d2, activeColor, isAnimating, bu
         {/* ─── PROP BET TRACKER ─── */}
         {propType && propBetAmt>0 && (()=>{
           const ALL_TALL=[8,9,10,11,12], ALL_SMALL=[2,3,4,5,6], MAKE_EM_ALL=[2,3,4,5,6,8,9,10,11,12];
-          const targets = propType==="tall"?ALL_TALL:propType==="small"?ALL_SMALL:MAKE_EM_ALL;
-          const label = propType==="tall"?"ALL TALL (175:1)":propType==="small"?"ALL SMALL (175:1)":"MAKE 'EM ALL (1000:1)";
-          const hitSet = propHit||new Set();
-          const pColor = propType==="tall"?"#f472b6":propType==="small"?"#38bdf8":"#c084fc";
-          const py = th-42; // position near bottom of expanded table
-          const numW = 32, gap=4, totalW=targets.length*(numW+gap)-gap;
-          const startX = (tw-totalW)/2;
-          return (
-            <g>
-              <rect x="16" y={py-18} width={tw-32} height="50" rx="6" fill="#1a5c2a" stroke={pColor} strokeWidth="1" opacity="0.6"/>
-              <text x={tw/2} y={py-4} textAnchor="middle" fill={pColor} fontSize="8" fontWeight="700" fontFamily="'JetBrains Mono',monospace" letterSpacing="2">{label}</text>
-              <Chip cx={56} cy={py+12} amount={propBetAmt} color={pColor} size={13}/>
-              {targets.map((n,i)=>{
-                const bx=startX+i*(numW+gap);
-                const isMarked = hitSet.has?hitSet.has(n):false;
-                const justHit = hitNum===n && isAnimating && isMarked;
-                return (
-                  <g key={n}>
-                    <rect x={bx} y={py+2} width={numW} height="22" rx="4"
-                      fill={isMarked?"#22c55e33":"#0a0a12"} stroke={isMarked?"#22c55e":pColor+"55"} strokeWidth={justHit?"2":"1"}
-                      opacity={isMarked?1:0.6}/>
-                    {justHit && <rect x={bx} y={py+2} width={numW} height="22" rx="4" fill="#22c55e" opacity="0.3" style={{animation:"hitGlow 0.6s ease-out forwards"}}/>}
-                    <text x={bx+numW/2} y={py+17} textAnchor="middle" fill={isMarked?"#4ade80":"#666"}
-                      fontSize="11" fontWeight={isMarked?"800":"400"} fontFamily="'JetBrains Mono',monospace">
-                      {isMarked?"✓":n}
-                    </text>
-                  </g>
-                );
-              })}
-              <text x={tw-56} y={py+17} textAnchor="middle" fill={pColor} fontSize="10" fontWeight="700" fontFamily="'JetBrains Mono',monospace">
-                {hitSet.size||0}/{targets.length}
-              </text>
-            </g>
-          );
+
+          function PropRow({label, targets, hitSet, color, py, betAmt, payLabel}) {
+            const numW=28, gap=3, totalW=targets.length*(numW+gap)-gap;
+            const startX=(tw-totalW)/2;
+            const hs=hitSet||new Set();
+            return (
+              <g>
+                <rect x="16" y={py-14} width={tw-32} height="38" rx="5" fill="#1a5c2a" stroke={color} strokeWidth="0.8" opacity="0.5"/>
+                <text x={46} y={py+1} textAnchor="middle" fill={color} fontSize="7" fontWeight="700" fontFamily="'JetBrains Mono',monospace">{label}</text>
+                <text x={46} y={py+12} textAnchor="middle" fill={color} fontSize="6" fontFamily="'JetBrains Mono',monospace" opacity="0.7">{payLabel}</text>
+                {targets.map((n,i)=>{
+                  const bx=startX+i*(numW+gap);
+                  const isMarked=hs.has?hs.has(n):false;
+                  const justHit=hitNum===n&&isAnimating&&isMarked;
+                  return (
+                    <g key={n}>
+                      <rect x={bx} y={py-2} width={numW} height="20" rx="3"
+                        fill={isMarked?"#22c55e33":"#0a0a12"} stroke={isMarked?"#22c55e":color+"44"} strokeWidth={justHit?"2":"0.8"}
+                        opacity={isMarked?1:0.5}/>
+                      {justHit&&<rect x={bx} y={py-2} width={numW} height="20" rx="3" fill="#22c55e" opacity="0.3" style={{animation:"hitGlow 0.6s ease-out forwards"}}/>}
+                      <text x={bx+numW/2} y={py+12} textAnchor="middle" fill={isMarked?"#4ade80":"#555"}
+                        fontSize="10" fontWeight={isMarked?"800":"400"} fontFamily="'JetBrains Mono',monospace">
+                        {isMarked?"✓":n}
+                      </text>
+                    </g>
+                  );
+                })}
+                <text x={tw-46} y={py+9} textAnchor="middle" fill={color} fontSize="9" fontWeight="700" fontFamily="'JetBrains Mono',monospace">
+                  {hs.size||0}/{targets.length}
+                </text>
+              </g>
+            );
+          }
+
+          if(isATS) {
+            // All 3 props stacked
+            const baseY=322;
+            return (
+              <g>
+                <PropRow label="SMALL" targets={ALL_SMALL} hitSet={propSmallHit} color="#38bdf8" py={baseY} payLabel="34:1"/>
+                <PropRow label="TALL" targets={ALL_TALL} hitSet={propTallHit} color="#f472b6" py={baseY+34} payLabel="34:1"/>
+                <PropRow label="ALL" targets={MAKE_EM_ALL} hitSet={propAllHit} color="#c084fc" py={baseY+68} payLabel="175:1"/>
+              </g>
+            );
+          } else {
+            // Single prop bet
+            const targets=propType==="tall"?ALL_TALL:propType==="small"?ALL_SMALL:MAKE_EM_ALL;
+            const hitSet=propType==="tall"?propTallHit:propType==="small"?propSmallHit:propAllHit;
+            const color=propType==="tall"?"#f472b6":propType==="small"?"#38bdf8":"#c084fc";
+            const payLabel=propType==="all"?"175:1":"34:1";
+            const label=propType==="tall"?"ALL TALL":propType==="small"?"ALL SMALL":"MAKE 'EM ALL";
+            return <PropRow label={label} targets={targets} hitSet={hitSet} color={color} py={th-30} payLabel={payLabel}/>;
+          }
         })()}
 
         </svg>
@@ -622,6 +727,9 @@ function CustomBuilder({config,setConfig}) {
 export default function CrapsSimulator() {
   const [strategy,setStrategy]=useState("passLine");
   const [baseBet,setBaseBet]=useState(10);
+  const [passLineBet,setPassLineBet]=useState(10);
+  const [acrossBet,setAcrossBet]=useState(10);
+  const [propBet,setPropBet]=useState(5);
   const [numRolls,setNumRolls]=useState(1000);
   const [startingBankroll,setStartingBankroll]=useState(1000);
   const [speed,setSpeed]=useState(50);
@@ -641,17 +749,18 @@ export default function CrapsSimulator() {
   const activeColor=strategy==="custom"?customConfig.color:(STRATEGIES[strategy]?.color||"#888");
   const activeDesc=strategy==="custom"?`Custom: ${customConfig.rules.length} rule(s)`:(STRATEGIES[strategy]?.description||"");
 
-  const runSim=useCallback(()=>{if(animRef.current)cancelAnimationFrame(animRef.current);const res=simulateStrategy(strategy,baseBet,numRolls,startingBankroll,customConfig);setResult(res);setAnimIndex(0);setIsPlaying(true);setLiveEvent(res.history[0]?.event||"");setLiveDice(null);},[strategy,baseBet,numRolls,startingBankroll,customConfig]);
-  const runInstant=useCallback(()=>{if(animRef.current)cancelAnimationFrame(animRef.current);setIsPlaying(false);const res=simulateStrategy(strategy,baseBet,numRolls,startingBankroll,customConfig);setResult(res);setAnimIndex(res.history.length-1);setLiveEvent(res.history[res.history.length-1]?.event||"");const l=res.history[res.history.length-1];if(l)setLiveDice({d1:l.d1,d2:l.d2});},[strategy,baseBet,numRolls,startingBankroll,customConfig]);
+  const betConfig={passLineBet,acrossBet,propBet};
+  const runSim=useCallback(()=>{if(animRef.current)cancelAnimationFrame(animRef.current);const res=simulateStrategy(strategy,baseBet,numRolls,startingBankroll,customConfig,betConfig);setResult(res);setAnimIndex(0);setIsPlaying(true);setLiveEvent(res.history[0]?.event||"");setLiveDice(null);},[strategy,baseBet,numRolls,startingBankroll,customConfig,betConfig]);
+  const runInstant=useCallback(()=>{if(animRef.current)cancelAnimationFrame(animRef.current);setIsPlaying(false);const res=simulateStrategy(strategy,baseBet,numRolls,startingBankroll,customConfig,betConfig);setResult(res);setAnimIndex(res.history.length-1);setLiveEvent(res.history[res.history.length-1]?.event||"");const l=res.history[res.history.length-1];if(l)setLiveDice({d1:l.d1,d2:l.d2});},[strategy,baseBet,numRolls,startingBankroll,customConfig,betConfig]);
 
   const runCompare=useCallback(()=>{
     if(animRef.current)cancelAnimationFrame(animRef.current);setIsPlaying(false);
     const allStrats={...STRATEGIES,custom:{name:customConfig.name,description:`Custom: ${customConfig.rules.length} rules`,color:customConfig.color}};
     const results={};
-    Object.keys(allStrats).forEach(key=>{const runs=[];for(let r=0;r<20;r++)runs.push(simulateStrategy(key,baseBet,numRolls,startingBankroll,customConfig));const avg=fn=>runs.reduce((s,r)=>s+fn(r),0)/runs.length;
+    Object.keys(allStrats).forEach(key=>{const runs=[];for(let r=0;r<20;r++)runs.push(simulateStrategy(key,baseBet,numRolls,startingBankroll,customConfig,betConfig));const avg=fn=>runs.reduce((s,r)=>s+fn(r),0)/runs.length;
       results[key]={avgFinal:avg(r=>r.final),avgHigh:avg(r=>r.high),avgLow:avg(r=>r.low),bestRun:runs.reduce((b,r)=>r.final>b.final?r:b,runs[0]),worstRun:runs.reduce((b,r)=>r.final<b.final?r:b,runs[0]),bustRate:runs.filter(r=>r.final<=0).length/runs.length};});
     setCompareResults(results);
-  },[baseBet,numRolls,startingBankroll,customConfig]);
+  },[baseBet,numRolls,startingBankroll,customConfig,passLineBet,acrossBet,propBet]);
 
   useEffect(()=>{
     if(!isPlaying||!result)return;let idx=animIndex||0;let lastTime=0;
@@ -708,6 +817,40 @@ export default function CrapsSimulator() {
           {[{label:"Base Bet ($)",value:baseBet,set:setBaseBet,min:1,max:500,step:5},{label:"Bankroll ($)",value:startingBankroll,set:setStartingBankroll,min:100,max:100000,step:100},{label:"Rolls",value:numRolls,set:setNumRolls,min:10,max:100000,step:10}].map(({label,value,set,min,max,step})=>(
             <div key={label} style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><label style={{fontSize:10,color:"#777"}}>{label}</label><span style={{fontSize:11,color:activeColor,fontWeight:500}}>{value.toLocaleString()}</span></div>
               <input type="range" min={min} max={max} step={step} value={value} onChange={e=>set(Number(e.target.value))} style={{width:"100%",accentColor:activeColor}}/></div>))}
+
+          {/* ATS Combo bet breakdown */}
+          {strategy==="atsCombo"&&(
+            <div style={{background:"#0f0f1e",border:"1px solid #fbbf2433",borderRadius:8,padding:"8px 10px",marginBottom:8}}>
+              <div style={{fontSize:9,color:"#fbbf24",letterSpacing:1.5,textTransform:"uppercase",marginBottom:8}}>Combo Bet Amounts</div>
+              {[
+                {label:"Pass Line",value:passLineBet,set:setPassLineBet,color:"#22c55e"},
+                {label:"Across (per #)",value:acrossBet,set:setAcrossBet,color:"#14b8a6"},
+                {label:"Prop (each)",value:propBet,set:setPropBet,color:"#c084fc"},
+              ].map(({label,value,set,color})=>(
+                <div key={label} style={{marginBottom:6}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                    <label style={{fontSize:10,color:"#777"}}>{label}</label>
+                    <span style={{fontSize:11,color,fontWeight:500}}>${value}</span>
+                  </div>
+                  <input type="range" min={1} max={500} step={5} value={value} onChange={e=>set(Number(e.target.value))} style={{width:"100%",accentColor:color}}/>
+                </div>
+              ))}
+              <div style={{fontSize:8,color:"#555",marginTop:4,lineHeight:1.5}}>
+                Total exposure per shooter: ${passLineBet} pass + ${passLineBet*2} odds + ${acrossBet*6} across + ${propBet*3} props = <span style={{color:"#fbbf24",fontWeight:700}}>${passLineBet+passLineBet*2+acrossBet*6+propBet*3}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Standalone prop bet amount */}
+          {(strategy==="allTall"||strategy==="allSmall"||strategy==="makeEmAll")&&(
+            <div style={{marginBottom:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                <label style={{fontSize:10,color:"#777"}}>Prop Bet ($)</label>
+                <span style={{fontSize:11,color:"#c084fc",fontWeight:500}}>${propBet}</span>
+              </div>
+              <input type="range" min={1} max={100} step={1} value={propBet} onChange={e=>setPropBet(Number(e.target.value))} style={{width:"100%",accentColor:"#c084fc"}}/>
+            </div>
+          )}
 
           <div style={{marginBottom:8}}>
             <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><label style={{fontSize:10,color:"#777"}}>Speed</label><span style={{fontSize:11,color:"#999"}}>{speed>=1000?`${(speed/1000).toFixed(1)}s`:speed+"ms"}</span></div>

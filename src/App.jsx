@@ -351,7 +351,7 @@ function CrapsTable({tableState, lastTotal, d1, d2, activeColor, isAnimating, bu
   else if(isWin && field>0) { floatX=180; floatY=th-118; }
 
   return (
-    <div style={{background:"#111122",borderRadius:10,border:"1px solid #1a1a2e",padding:"12px",marginBottom:14,position:"relative",overflow:"hidden"}}>
+    <div style={{background:"#111122",borderRadius:10,border:"1px solid #1a1a2e",padding:"12px",marginBottom:14,position:"relative",overflow:"hidden",width:"100%",boxSizing:"border-box"}}>
       <style>{`
         @keyframes chipPulse { 0%{transform:scale(1.4);opacity:0.5} 100%{transform:scale(1);opacity:1} }
         @keyframes diceRoll { 0%{transform:rotate(0deg) scale(0.5);opacity:0} 50%{transform:rotate(180deg) scale(1.2);opacity:1} 100%{transform:rotate(360deg) scale(1);opacity:1} }
@@ -668,11 +668,11 @@ export default function CrapsSimulator() {
   const curBR=curEntry?.bankroll; const pnl=curBR!==null&&curBR!==undefined?curBR-startingBankroll:null;
 
   return (
-    <div style={{minHeight:"100vh",background:"#0a0a12",color:"#e0e0e0",fontFamily:"'JetBrains Mono','Fira Code','Courier New',monospace"}}>
+    <div style={{minHeight:"100vh",width:"100vw",maxWidth:"100vw",overflow:"hidden",background:"#0a0a12",color:"#e0e0e0",fontFamily:"'JetBrains Mono','Fira Code','Courier New',monospace"}}>
       <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet"/>
 
       {/* Header */}
-      <div style={{background:"linear-gradient(135deg,#1a0a0a 0%,#0a0a12 50%,#0a1a0a 100%)",borderBottom:"1px solid #222",padding:"12px 20px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+      <div style={{background:"linear-gradient(135deg,#1a0a0a 0%,#0a0a12 50%,#0a1a0a 100%)",borderBottom:"1px solid #222",padding:"12px 20px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",width:"100%",boxSizing:"border-box"}}>
         <div style={{display:"flex",gap:4}}><DieFace value={5} size={28} color="#c41e3a"/><DieFace value={2} size={28} color="#c41e3a"/></div>
         <div>
           <h1 style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:900,margin:0,background:"linear-gradient(90deg,#c41e3a,#ffd700)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",letterSpacing:1}}>CRAPS SIMULATOR</h1>
@@ -686,7 +686,7 @@ export default function CrapsSimulator() {
         </div>
       </div>
 
-      <div style={{display:"flex",minHeight:"calc(100vh - 66px)"}}>
+      <div style={{display:"flex",width:"100%",minHeight:"calc(100vh - 66px)"}}>
         {/* Sidebar */}
         <div style={{width:tab==="custom"?310:250,flexShrink:0,background:"#0d0d18",borderRight:"1px solid #1a1a2e",padding:"12px 10px",overflowY:"auto"}}>
           <div style={{fontSize:8,color:"#444",letterSpacing:2,textTransform:"uppercase",marginBottom:8}}>Configuration</div>
@@ -742,7 +742,7 @@ export default function CrapsSimulator() {
         </div>
 
         {/* Main */}
-        <div style={{flex:1,padding:"12px 16px",overflowY:"auto",overflowX:"hidden",minWidth:0}}>
+        <div style={{flex:"1 1 0%",minWidth:0,padding:"12px 16px",overflowY:"auto",overflowX:"hidden"}}>
           {(tab==="single"||tab==="custom")&&(<>
             {/* Live status bar */}
             {result&&(
@@ -761,7 +761,7 @@ export default function CrapsSimulator() {
 
             {/* Chart */}
             {result&&(
-              <div style={{background:"#111122",borderRadius:9,border:"1px solid #1a1a2e",padding:"10px",marginBottom:12}}>
+              <div style={{background:"#111122",borderRadius:9,border:"1px solid #1a1a2e",padding:"10px",marginBottom:12,width:"100%",boxSizing:"border-box"}}>
                 <div style={{fontSize:8,color:"#444",letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>Bankroll</div>
                 <BigChart data={result.history} color={activeColor} startingBankroll={startingBankroll} animIndex={animIndex}/>
               </div>
@@ -787,12 +787,12 @@ export default function CrapsSimulator() {
               const visibleCount = Math.min(animIndex!==null?animIndex+1:result.history.length, result.history.length);
               const entries = result.history.slice(Math.max(0,visibleCount-200), visibleCount);
               return (
-                <div style={{background:"#111122",borderRadius:9,border:"1px solid #1a1a2e",padding:"10px",marginBottom:12}}>
+                <div style={{background:"#111122",borderRadius:9,border:"1px solid #1a1a2e",padding:"10px",marginBottom:12,width:"100%",boxSizing:"border-box"}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                     <div style={{fontSize:8,color:"#444",letterSpacing:2,textTransform:"uppercase"}}>Roll Log</div>
                     <div style={{fontSize:9,color:"#555"}}>{visibleCount-1} / {result.history.length-1} rolls</div>
                   </div>
-                  <div ref={logRef} style={{maxHeight:220,overflowY:"auto",fontFamily:"'JetBrains Mono',monospace",fontSize:10,lineHeight:1.8}}>
+                  <div ref={logRef} style={{maxHeight:220,overflowY:"auto",overflowX:"auto",fontFamily:"'JetBrains Mono',monospace",fontSize:10,lineHeight:1.8}}>
                     {/* Header row */}
                     <div style={{display:"grid",gridTemplateColumns:"50px 44px 1fr 90px 80px",gap:6,padding:"4px 6px",borderBottom:"1px solid #1a1a2e",position:"sticky",top:0,background:"#111122",zIndex:1}}>
                       <span style={{color:"#555",fontWeight:700}}>Roll</span>
